@@ -56,10 +56,6 @@ async def download_file(client, url, folder, semaphores):
     semaphore = get_semaphore_for_url(url, semaphores)
 
     async with semaphore:
-        # Для Архивача добавляем небольшую случайную задержку, чтобы не долбить сервер
-        if "arhivach" in url:
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-
         retries = 5
         base_delay = 2
 
@@ -114,7 +110,7 @@ async def process_thread(client, thread_url, base_folder, allowed_exts, semaphor
 
     for tag in soup.find_all("a", href=True):
         href = tag["href"]
-        # Фикс для относительных путей (особенно актуально для 2ch)
+        # Фикс для относительных путей
         full_url = urljoin(thread_url, href)
 
         # Проверяем расширение у чистого пути (без query параметров)
@@ -146,7 +142,7 @@ async def process_thread(client, thread_url, base_folder, allowed_exts, semaphor
 
 async def main():
     parser = argparse.ArgumentParser(
-        description="Загрузчик медиафайлов с 2ch и Arhivach"
+        description="Загрузчик медиафайлов с 2ch и arhivach"
     )
     parser.add_argument("path", type=Path, help="Папка для сохранения")
     parser.add_argument("type", choices=["img", "vid", "both"], help="Тип файлов")
@@ -170,10 +166,8 @@ async def main():
 
     # РАЗНЫЕ ЛИМИТЫ ДЛЯ РАЗНЫХ САЙТОВ
     semaphores = {
-        "default": asyncio.Semaphore(10),  # Для 2ch и прочих быстрых
-        "arhivach": asyncio.Semaphore(
-            2
-        ),  # Arhivach очень слабый, ему нужно мало потоков
+        "default": asyncio.Semaphore(10),  # Для 2ch
+        "arhivach": asyncio.Semaphore(4),  # Для arhivach
     }
 
     target_extensions = MEDIA_EXTENSIONS[args.type]
