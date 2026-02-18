@@ -10,24 +10,20 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%H:%M:%S",
 )
-# Отключаем лишний шум от библиотек
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 log = logging.getLogger(__name__)
 
-# Регулярки
 THREAD_REGEX = re.compile(
     r"^https?://(?:2ch\.[a-z]{2,5}/[a-z]+/res/\d+\.html|arhivach\.[a-z]{2,5}/thread/\d+/?)$"
 )
 THREAD_ID_REGEX = re.compile(r"/(\d+)(?:\.html)?(?:#.*)?/?$")
 
-# Типы файлов
 MEDIA_EXTENSIONS = {
     "img": {".jpg", ".jpeg", ".png", ".gif", ".webp"},
     "vid": {".mp4", ".webm", ".mkv", ".avi", ".mov"},
@@ -65,9 +61,8 @@ async def download_file(client, url, folder, semaphores):
                 response.raise_for_status()
                 filepath.write_bytes(response.content)
                 log.info(f"Сохранено: {filename}")
-                return  # Успех, выходим
+                return
             except httpx.HTTPStatusError as e:
-                # Если ошибка 503, 502, 504 или 429 - пробуем снова
                 if e.response.status_code in (429, 502, 503, 504):
                     if attempt < retries:
                         sleep_time = base_delay * attempt + random.uniform(0, 1)
@@ -90,7 +85,6 @@ async def download_file(client, url, folder, semaphores):
 async def process_thread(client, thread_url, base_folder, allowed_exts, semaphores):
     log.info(f"Анализ треда: {thread_url}")
     try:
-        # Для получения списка файлов тоже используем повторные попытки
         for attempt in range(3):
             try:
                 response = await client.get(thread_url)
@@ -110,10 +104,9 @@ async def process_thread(client, thread_url, base_folder, allowed_exts, semaphor
 
     for tag in soup.find_all("a", href=True):
         href = tag["href"]
-        # Фикс для относительных путей
+
         full_url = urljoin(thread_url, href)
 
-        # Проверяем расширение у чистого пути (без query параметров)
         parsed = urlparse(full_url)
         path = parsed.path.lower()
 
@@ -127,7 +120,6 @@ async def process_thread(client, thread_url, base_folder, allowed_exts, semaphor
     thread_id_match = THREAD_ID_REGEX.search(thread_url)
     thread_id = thread_id_match.group(1) if thread_id_match else "unknown_thread"
 
-    # Добавляем домен к имени папки, чтобы не путались id с разных сайтов
     domain_prefix = "arhivach" if "arhivach" in thread_url else "2ch"
     save_dir = base_folder / f"{domain_prefix}_{thread_id}"
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -164,10 +156,9 @@ async def main():
         log.error("Нет валидных ссылок. Проверьте формат.")
         sys.exit(1)
 
-    # РАЗНЫЕ ЛИМИТЫ ДЛЯ РАЗНЫХ САЙТОВ
     semaphores = {
-        "default": asyncio.Semaphore(10),  # Для 2ch
-        "arhivach": asyncio.Semaphore(4),  # Для arhivach
+        "default": asyncio.Semaphore(10),
+        "arhivach": asyncio.Semaphore(7),
     }
 
     target_extensions = MEDIA_EXTENSIONS[args.type]
