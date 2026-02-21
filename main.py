@@ -41,8 +41,10 @@ HEADERS = {
     )
 }
 
+# Статусы, при которых имеет смысл повторять запрос
 RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 
+# Ограничение параллельных загрузок по домену
 SEMAPHORE_LIMITS: dict[str, int] = {
     "arhivach": 3,  # нестабильный хост
     "default": 8,
@@ -61,16 +63,11 @@ CHUNK_SIZE = 256 * 1024
 
 
 def domain_key(url: str) -> str:
-    """Возвращает ключ домена для выбора семафора."""
+    # Возвращаем ключ домена для выбора семафора
     return "arhivach" if "arhivach" in url else "default"
 
 
 def full_jitter(attempt: int) -> float:
-    """
-    Full-jitter exponential backoff.
-    sleep = random(0, min(cap, base * 2^attempt))
-    Источник: AWS Architecture Blog — избегаем thundering herd.
-    """
     cap = MAX_DELAY_SEC
     ceiling = min(cap, BASE_DELAY_SEC * (2**attempt))
     return random.uniform(0, ceiling)
@@ -83,10 +80,6 @@ async def fetch_with_retry(
     extra_headers: dict | None = None,
     max_retries: int = MAX_RETRIES,
 ) -> httpx.Response:
-    """
-    Выполняет GET-запрос с экспоненциальным backoff.
-    Бросает исключение, если все попытки исчерпаны.
-    """
     headers = extra_headers or {}
     last_exc: Exception | None = None
 
@@ -143,13 +136,6 @@ async def download_file(
     semaphores: dict[str, asyncio.Semaphore],
     progress: dict,
 ) -> None:
-    """
-    Скачивает один файл:
-    - стриминг по чанкам (не грузит всё в RAM)
-    - атомарная запись через .tmp → rename
-    - resume через Range-header, если .tmp уже существует
-    - пропускает файл, если он уже полностью скачан
-    """
     filename = Path(urlparse(url).path).name
     filepath = folder / filename
     tmp_path = filepath.with_suffix(filepath.suffix + ".tmp")
@@ -161,7 +147,7 @@ async def download_file(
     sem = semaphores[domain_key(url)]
 
     async with sem:
-        # ── Определяем, есть ли частичная загрузка ──
+        # Определяем, произошла ли частичная подгрузка файла
         resume_from = tmp_path.stat().st_size if tmp_path.exists() else 0
         extra_headers = {"Range": f"bytes={resume_from}-"} if resume_from else {}
 
@@ -178,7 +164,6 @@ async def download_file(
             progress["fail"] += 1
             return
 
-        # ── Проверка Content-Type ──
         content_type = response.headers.get("content-type", "")
         if "text/html" in content_type:
             log.warning(
@@ -188,7 +173,7 @@ async def download_file(
             progress["fail"] += 1
             return
 
-        # ── Потоковая запись ──
+        # Потоковая запись
         mode = "ab" if resume_from and response.status_code == 206 else "wb"
         try:
             with tmp_path.open(mode) as fh:
@@ -299,7 +284,6 @@ async def main() -> None:
     }
     target_exts = MEDIA_EXTENSIONS[args.type]
 
-    # follow_redirects=True — нужен для архивача, который часто редиректит
     async with httpx.AsyncClient(
         headers=HEADERS,
         verify=False,
