@@ -41,21 +41,17 @@ HEADERS = {
     )
 }
 
-# Статусы, при которых имеет смысл повторять запрос
 RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 
-# Ограничение параллельных загрузок по домену
 SEMAPHORE_LIMITS: dict[str, int] = {
-    "arhivach": 3,  # нестабильный хост
+    "arhivach": 3,
     "default": 8,
 }
 
-# Параметры retry
 MAX_RETRIES = 7
 BASE_DELAY_SEC = 1.5
 MAX_DELAY_SEC = 60.0
 
-# Минимальный размер чанка стриминга (256 KB)
 CHUNK_SIZE = 256 * 1024
 
 
@@ -63,7 +59,6 @@ CHUNK_SIZE = 256 * 1024
 
 
 def domain_key(url: str) -> str:
-    # Возвращаем ключ домена для выбора семафора
     return "arhivach" if "arhivach" in url else "default"
 
 
@@ -122,7 +117,6 @@ async def fetch_with_retry(
                 continue
             raise
 
-    # Сюда попадаем только если вышли из цикла без return/raise
     raise last_exc or RuntimeError(f"Не удалось выполнить запрос: {url}")
 
 
@@ -147,7 +141,6 @@ async def download_file(
     sem = semaphores[domain_key(url)]
 
     async with sem:
-        # Определяем, произошла ли частичная подгрузка файла
         resume_from = tmp_path.stat().st_size if tmp_path.exists() else 0
         extra_headers = {"Range": f"bytes={resume_from}-"} if resume_from else {}
 
@@ -173,21 +166,18 @@ async def download_file(
             progress["fail"] += 1
             return
 
-        # Потоковая запись
         mode = "ab" if resume_from and response.status_code == 206 else "wb"
         try:
             with tmp_path.open(mode) as fh:
                 async for chunk in response.aiter_bytes(CHUNK_SIZE):
                     fh.write(chunk)
 
-            # Атомарный rename: файл либо есть целиком, либо нет
             tmp_path.rename(filepath)
             log.info("✓ %s", filename)
             progress["ok"] += 1
 
         except Exception as exc:
             log.error("Ошибка записи %s: %s", filename, exc)
-            # tmp оставляем — можно будет дозакачать при следующем запуске
             progress["fail"] += 1
 
 
